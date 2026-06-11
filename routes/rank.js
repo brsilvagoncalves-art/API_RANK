@@ -46,7 +46,7 @@ router.get('/valorant', async (req, res) => {
                     name: cleanName,
                     tag: cleanTag,
                     filter: 'competitive',
-                    size: 20
+                    size: 15
                 });
 
                 if (matches.data && Array.isArray(matches.data)) {
