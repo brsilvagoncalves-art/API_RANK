@@ -20,7 +20,7 @@ router.get('/valorant', async (req, res) => {
         let rankData;
         const cached = cache[cacheKey];
 
-        // Cache de 1 minuto para atualizar mais rápido conforme conversamos antes
+        // Cache de 1 minuto para atualização ágil
         if (cached && Date.now() - cached.timestamp < 60000) {
             rankData = cached.data;
         } else {
@@ -36,7 +36,7 @@ router.get('/valorant', async (req, res) => {
                 throw new Error("Perfil sem dados competitivos recentes.");
             }
 
-            // 2. Busca o histórico das últimas partidas para calcular o W/L do dia
+            // 2. Busca o histórico de partidas
             let vitorias = 0;
             let derrotas = 0;
             
@@ -46,24 +46,22 @@ router.get('/valorant', async (req, res) => {
                     name: cleanName,
                     tag: cleanTag,
                     filter: 'competitive',
-                    size: 15
+                    limit: 15 // Puxa uma lista maior para garantir que cobre o dia de jogos
                 });
 
                 if (matches.data && Array.isArray(matches.data)) {
-                    // CORREÇÃO DE FUSO HORÁRIO: Pega a data de hoje no fuso correto do Brasil (AAAA-MM-DD)
-                    const hojeBrasil = new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
-                    // Converte de DD/MM/AAAA para o padrão internacional AAAA-MM-DD para comparar
-                    const [dia, mes, ano] = hojeBrasil.split('/');
-                    const dataHojeFormatada = `${ano}-${mes}-${dia}`;
+                    const agora = Date.now();
+                    const limiteQuinzeHoras = 15 * 60 * 60 * 1000; // Janela de tempo de uma stream de hoje
 
                     matches.data.forEach(match => {
-                        //CORREÇÃO DE FUSO HORÁRIO: Converte o horário do jogo para a data do Brasil
-                        const matchDateBrasil = new Date(match.metadata.game_start * 1000).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
-                        const [mDia, mMes, mAno] = matchDateBrasil.split('/');
-                        const dataMatchFormatada = `${mAno}-${mMes}-${mDia}`;
+                        const matchTimestamp = match.metadata.game_start * 1000;
                         
-                        // Agora a comparação é 100% precisa com o horário de Brasília
-                        if (dataMatchFormatada === dataHojeFormatada) {
+                        // 🔥 TRAVA DE SEGURANÇA: Só conta se for estritamente o modo Competitivo oficial da Riot
+                        const modoJogo = match.metadata.mode;
+                        const ehCompetitivo = modoJogo && modoJogo.toLowerCase() === 'competitive';
+
+                        // Só processa se estiver na janela de tempo E for modo competitivo de verdade
+                        if ((agora - matchTimestamp < limiteQuinzeHoras) && ehCompetitivo) {
                             const player = match.players.all_players.find(
                                 p => p.name.toLowerCase() === cleanName.toLowerCase()
                             );
