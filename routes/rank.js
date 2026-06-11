@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const HenrikDevValorantAPI = require('unofficial-valorant-api');
+const axios = require('axios'); // 🔥 Importa o Axios para termos controle total das requisições
 
 const vapi = new HenrikDevValorantAPI(process.env.HENRIK_ADVANCE_KEY);
 const cache = {};
@@ -20,11 +21,11 @@ router.get('/valorant', async (req, res) => {
         let rankData;
         const cached = cache[cacheKey];
 
-        // Cache local de 1 minuto
+        // Cache local de 1 minuto para não estourar a cota da chave
         if (cached && Date.now() - cached.timestamp < 60000) {
             rankData = cached.data;
         } else {
-            // 1. Busca os dados de Elo atuais
+            // 1. Busca os dados de Elo atuais usando o SDK (que funciona perfeitamente)
             const mmr_data = await vapi.getMMR({ 
                 version: 'v2', 
                 region: 'br', 
@@ -36,30 +37,29 @@ router.get('/valorant', async (req, res) => {
                 throw new Error("Perfil sem dados competitivos recentes.");
             }
 
-            // 2. Busca o histórico de partidas com os novos padrões da API
+            // 2. Busca o histórico de partidas DIRETAMENTE via Axios para quebrar as limitações do SDK
             let vitorias = 0;
             let derrotas = 0;
             
             try {
-                const matches = await vapi.getMatches({
-                    region: 'br',
-                    name: cleanName,
-                    tag: cleanTag,
-                    mode: 'competitive', // 🔥 ATUALIZADO: Mudou de 'filter' para 'mode' nas novas versões!
-                    size: 25,
-                    options: {
-                        uncached: true // 🔥 Força o HenrikDev a buscar dados limpos na Riot
+                // Montamos a URL nativa do HenrikDev forçando 25 partidas e desativando o cache deles (?uncached=true)
+                const urlMatches = `https://api.henrikdev.com/valorant/v3/matches/br/${encodeURIComponent(cleanName)}/${encodeURIComponent(cleanTag)}?limit=25&mode=competitive&uncached=true`;
+                
+                const response = await axios.get(urlMatches, {
+                    headers: {
+                        'Authorization': process.env.HENRIK_ADVANCE_KEY // Envia sua chave de produção com segurança
                     }
                 });
 
-                if (matches.data && Array.isArray(matches.data)) {
+                const matchesData = response.data;
+
+                if (matchesData && Array.isArray(matchesData.data)) {
                     // Obtém a data de HOJE no fuso horário de Brasília (Formato: DD/MM/AAAA)
                     const hojeBrasil = new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 
-                    matches.data.forEach(match => {
+                    matchesData.data.forEach(match => {
                         const dataPartidaBrasil = new Date(match.metadata.game_start * 1000).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
                         
-                        // Garante dupla validação de modo competitivo por string bruta caso o parâmetro falhe
                         const modoJogo = match.metadata.mode;
                         const ehCompetitivo = modoJogo && modoJogo.toLowerCase() === 'competitive';
 
@@ -84,7 +84,7 @@ router.get('/valorant', async (req, res) => {
                     });
                 }
             } catch (matchError) {
-                console.log("Erro ao computar histórico de partidas:", matchError.message);
+                console.log("Erro na requisição direta de partidas:", matchError.message);
             }
 
             rankData = {
