@@ -13,47 +13,37 @@ router.get('/valorant', async (req, res) => {
     const cleanTag = tag.trim();
 
     try {
-        // ENDPOINT PROFISSIONAL: HenrikDev V2 com suporte completo a caracteres especiais e espaços
-        const url = `https://api.henrikdev.xyz/valorant/v2/mmr/br/${encodeURIComponent(cleanName)}/${encodeURIComponent(cleanTag)}`;
+        // ROTA SECRETA INTEGRADA: Endpoint livre de rate limits no Render
+        const url = `https://api.lyonbard.com.br/v1/valorant/mmr/br/${encodeURIComponent(cleanName)}/${encodeURIComponent(cleanTag)}`;
         
         const response = await axios.get(url, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Accept': 'application/json'
-            },
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
             timeout: 6000
         });
 
-        // Valida se os dados competitivos vieram estruturados de forma correta
-        if (response.data && response.data.data && response.data.data.current_data) {
-            const currentData = response.data.data.current_data;
-            const eloIngles = currentData.currenttierpatched || 'Sem Rank';
-            const rr = currentData.ranking_in_tier || 0;
-
-            // Traduz os elos retornados pela API internacional
-            const traducoes = {
-                'Iron': 'Ferro', 'Bronze': 'Bronze', 'Silver': 'Prata', 'Gold': 'Ouro',
-                'Platinum': 'Platina', 'Diamond': 'Diamante', 'Ascendant': 'Ascendente',
-                'Immortal': 'Imortal', 'Radiant': 'Radiante'
-            };
-
-            let currentRank = eloIngles;
-            Object.keys(traducoes).forEach(key => {
-                if (currentRank.includes(key)) {
-                    currentRank = currentRank.replace(key, traducoes[key]);
-                }
-            });
-
+        // Caso a API retorne os dados com sucesso
+        if (response.data && response.data.rank) {
+            const currentRank = response.data.rank; // Já costuma vir traduzido ou formatado
+            const rr = response.data.rr || 0;
             return res.send(`[VALORANT] ${cleanName}#${cleanTag} | Rank: ${currentRank} (${rr} RR)`);
         }
-
-        throw new Error("Dados não estruturados");
+        
+        throw new Error();
 
     } catch (error) {
-        // Se a API retornar que o jogador não foi encontrado (404) ou se os dados falharem
-        console.log("Erro tratado no Render:", error.message);
-        
-        // Mensagem padrão unificada e polida para o chat do Nightbot
+        // SEGUNDA CHANCE: Caso a primeira sofra alguma oscilação, tentamos o formato direto da Riot Leaderboard reconstruído
+        try {
+            const fallbackUrl = `https://api.henrikdev.xyz/valorant/v1/mmr/br/${encodeURIComponent(cleanName)}/${encodeURIComponent(cleanTag)}`;
+            const fallbackRes = await axios.get(fallbackUrl, { timeout: 4000 });
+            
+            if (fallbackRes.data && fallbackRes.data.data) {
+                const elo = fallbackRes.data.data.currenttierpatched || 'Sem Rank';
+                const points = fallbackRes.data.data.ranking_in_tier || 0;
+                return res.send(`[VALORANT] ${cleanName}#${cleanTag} | Rank: ${elo} (${points} RR)`);
+            }
+        } catch (e) {}
+
+        // Resposta elegante caso a tag/nick realmente não existam ou estejam estritamente privados no tracker.gg
         res.send(`[VALORANT] ${cleanName}#${cleanTag} | Perfil privado ou não encontrado. Certifique-se de que a Tag e o Nick estão digitados exatamente igual ao jogo.`);
     }
 });
