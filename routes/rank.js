@@ -3,6 +3,7 @@ const router = express.Router();
 const HenrikDevValorantAPI = require('unofficial-valorant-api');
 
 const vapi = new HenrikDevValorantAPI(process.env.HENRIK_ADVANCE_KEY);
+const cache = {};
 
 router.get('/valorant', async (req, res) => {
     const { name, tag } = req.query;
@@ -11,51 +12,107 @@ router.get('/valorant', async (req, res) => {
         return res.send('Erro: Você precisa informar o nome e a tag.');
     }
 
+    const cleanName = name.trim();
+    const cleanTag = tag.trim();
+    const cacheKey = `br-${cleanName.toLowerCase()}-${cleanTag.toLowerCase()}`;
+
     try {
-        const matches = await vapi.getMatches({
-            region: 'br',
-            name: name.trim(),
-            tag: tag.trim(),
-            filter: 'competitive',
-            size: 20
-        });
+        let rankData;
+        const cached = cache[cacheKey];
 
-        if (!matches.data || !Array.isArray(matches.data)) {
-            return res.send("Nenhuma partida encontrada ou erro na API.");
-        }
+        // Cache local de 1 minuto para proteção de taxa da API
+        if (cached && Date.now() - cached.timestamp < 60000) {
+            rankData = cached.data;
+        } else {
+            // 1. Busca os dados de Elo atuais
+            const mmr_data = await vapi.getMMR({ 
+                version: 'v2', 
+                region: 'br', 
+                name: cleanName, 
+                tag: cleanTag 
+            });
 
-        const hojeBrasil = new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
-        
-        // Vamos montar uma lista em texto para ver no navegador exatamente o que está acontecendo
-        let respostaDiagnostico = `DATA DE HOJE NO BOT: ${hojeBrasil}\n\n`;
-        respostaDiagnostico += `LISTA DE PARTIDAS RECEBIDAS DA API:\n`;
-        respostaDiagnostico += `=====================================\n`;
-
-        matches.data.forEach((match, index) => {
-            const dataPartidaBrasil = new Date(match.metadata.game_start * 1000).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
-            const horaPartidaBrasil = new Date(match.metadata.game_start * 1000).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo' });
-            const modoJogo = match.metadata.mode;
-            const mapa = match.metadata.map;
-
-            // Encontra se o jogador venceu ou perdeu
-            const player = match.players.all_players.find(p => p.name.toLowerCase() === name.trim().toLowerCase());
-            let resultado = "Não encontrado";
-            if (player) {
-                const playerTeam = player.team.toLowerCase();
-                if (match.teams[playerTeam]) {
-                    resultado = match.teams[playerTeam].has_won ? "VITÓRIA" : "DERROTA";
-                }
+            if (mmr_data.error || !mmr_data.data?.current_data?.currenttierpatched) {
+                throw new Error("Perfil sem dados competitivos recentes.");
             }
 
-            respostaDiagnostico += `[Jogo ${index + 1}] Mapa: ${mapa} | Modo: ${modoJogo} | Data: ${dataPartidaBrasil} às ${horaPartidaBrasil} | Resultado: ${resultado}\n`;
+            // 2. Busca o histórico estendido de partidas
+            let vitorias = 0;
+            let derrotas = 0;
+            
+            try {
+                const matches = await vapi.getMatches({
+                    region: 'br',
+                    name: cleanName,
+                    tag: cleanTag,
+                    size: 25 // Limite alto para garantir que lê todas as partidas do dia
+                });
+
+                if (matches.data && Array.isArray(matches.data)) {
+                    // Obtém a data de HOJE no fuso horário de Brasília (Formato: DD/MM/AAAA)
+                    const hojeBrasil = new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+
+                    matches.data.forEach(match => {
+                        // Converte o timestamp do início da partida para a data no fuso de Brasília
+                        const dataPartidaBrasil = new Date(match.metadata.game_start * 1000).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+
+                        // Se a partida aconteceu na data de hoje no Brasil, ela entra na soma
+                        if (dataPartidaBrasil === hojeBrasil) {
+                            const player = match.players.all_players.find(
+                                p => p.name.toLowerCase() === cleanName.toLowerCase()
+                            );
+                            
+                            if (player) {
+                                const playerTeam = player.team.toLowerCase();
+                                const teamStats = match.teams[playerTeam];
+                                
+                                if (teamStats) {
+                                    if (teamStats.has_won) {
+                                        vitorias++;
+                                    } else {
+                                        derrotas++;
+                                    }
+                                }
+                            }
+                        }
+                    });
+                }
+            } catch (matchError) {
+                console.log("Erro ao computar histórico de partidas:", matchError.message);
+            }
+
+            rankData = {
+                rank: mmr_data.data.current_data.currenttierpatched,
+                rr: mmr_data.data.current_data.ranking_in_tier,
+                name: mmr_data.data.name,
+                tag: mmr_data.data.tag,
+                vitorias,
+                derrotas
+            };
+
+            cache[cacheKey] = { data: rankData, timestamp: Date.now() };
+        }
+
+        // Tradução do Elo para português brasileiro
+        const traducoes = {
+            'Iron': 'Ferro', 'Bronze': 'Bronze', 'Silver': 'Prata', 'Gold': 'Ouro',
+            'Platinum': 'Platina', 'Diamond': 'Diamante', 'Ascendant': 'Ascendente',
+            'Immortal': 'Imortal', 'Radiant': 'Radiante'
+        };
+
+        let currentRank = rankData.rank;
+        Object.keys(traducoes).forEach(key => {
+            if (currentRank.includes(key)) {
+                currentRank = currentRank.replace(key, traducoes[key]);
+            }
         });
 
-        // Altera o cabeçalho para o navegador exibir quebras de linha bonitinhas (\n)
-        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-        return res.send(respostaDiagnostico);
+        // Retorna a string limpa idêntica ao formato esperado pelo Nightbot
+        return res.send(`[VALORANT] ${rankData.name}#${rankData.tag} | Rank: ${currentRank} (${rankData.rr} RR) | Histórico de Hoje: ${rankData.vitorias}V / ${rankData.derrotas}D`);
 
     } catch (error) {
-        return res.send(`Erro no diagnóstico: ${error.message}`);
+        console.log("Erro na execução geral:", error.message);
+        res.send(`[VALORANT] ${cleanName}#${cleanTag} | Erro ao carregar elo. Verifique se o Nick/Tag estão corretos.`);
     }
 });
 
