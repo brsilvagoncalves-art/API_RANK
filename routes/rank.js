@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const HenrikDevValorantAPI = require('unofficial-valorant-api');
+const axios = require('axios'); // 🔥 Essencial para bater na rota de carreira
 
 const vapi = new HenrikDevValorantAPI(process.env.HENRIK_ADVANCE_KEY);
 const cache = {};
@@ -20,11 +21,10 @@ router.get('/valorant', async (req, res) => {
         let rankData;
         const cached = cache[cacheKey];
 
-        // Cache local de 1 minuto para proteção de taxa da API
         if (cached && Date.now() - cached.timestamp < 60000) {
             rankData = cached.data;
         } else {
-            // 1. Busca os dados de Elo atuais
+            // 1. Busca o Elo (Mantemos o SDK aqui porque funciona perfeito)
             const mmr_data = await vapi.getMMR({ 
                 version: 'v2', 
                 region: 'br', 
@@ -36,49 +36,47 @@ router.get('/valorant', async (req, res) => {
                 throw new Error("Perfil sem dados competitivos recentes.");
             }
 
-            // 2. Busca o histórico estendido de partidas
+            // 2. Busca o histórico quebrando o limite de 10 partidas
             let vitorias = 0;
             let derrotas = 0;
             
             try {
-                const matches = await vapi.getMatches({
-                    region: 'br',
-                    name: cleanName,
-                    tag: cleanTag,
-                    size: 35 // Limite alto para garantir que lê todas as partidas do dia
+                // 🔥 ROTA LIFETIME: Permite buscar até 100 partidas sem a trava de 10 jogos da rota padrão
+                const urlLifetime = `https://api.henrikdev.com/valorant/v1/lifetime/matches/br/${encodeURIComponent(cleanName)}/${encodeURIComponent(cleanTag)}?mode=competitive&size=25`;
+                
+                const response = await axios.get(urlLifetime, {
+                    headers: { 'Authorization': process.env.HENRIK_ADVANCE_KEY }
                 });
 
-                if (matches.data && Array.isArray(matches.data)) {
-                    // Obtém a data de HOJE no fuso horário de Brasília (Formato: DD/MM/AAAA)
+                const matchesList = response.data.data;
+
+                if (matchesList && Array.isArray(matchesList)) {
                     const hojeBrasil = new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 
-                    matches.data.forEach(match => {
-                        // Converte o timestamp do início da partida para a data no fuso de Brasília
-                        const dataPartidaBrasil = new Date(match.metadata.game_start * 1000).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+                    matchesList.forEach(match => {
+                        // Na rota Lifetime, a data vem bonitinha no formato ISO
+                        const dataPartidaBrasil = new Date(match.meta.started_at).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 
-                        // Se a partida aconteceu na data de hoje no Brasil, ela entra na soma
                         if (dataPartidaBrasil === hojeBrasil) {
-                            const player = match.players.all_players.find(
-                                p => p.name.toLowerCase() === cleanName.toLowerCase()
-                            );
+                            // Descobre de qual lado o streamer jogou (red ou blue)
+                            const myTeam = match.stats.team.toLowerCase(); 
+                            const myScore = match.teams[myTeam];
                             
-                            if (player) {
-                                const playerTeam = player.team.toLowerCase();
-                                const teamStats = match.teams[playerTeam];
-                                
-                                if (teamStats) {
-                                    if (teamStats.has_won) {
-                                        vitorias++;
-                                    } else {
-                                        derrotas++;
-                                    }
-                                }
+                            // Descobre a pontuação do time inimigo
+                            const enemyTeam = myTeam === 'red' ? 'blue' : 'red';
+                            const enemyScore = match.teams[enemyTeam];
+                            
+                            // Compara os placares
+                            if (myScore > enemyScore) {
+                                vitorias++;
+                            } else if (enemyScore > myScore) {
+                                derrotas++;
                             }
                         }
                     });
                 }
             } catch (matchError) {
-                console.log("Erro ao computar histórico de partidas:", matchError.message);
+                console.log("Erro na API Lifetime:", matchError.message);
             }
 
             rankData = {
@@ -93,7 +91,6 @@ router.get('/valorant', async (req, res) => {
             cache[cacheKey] = { data: rankData, timestamp: Date.now() };
         }
 
-        // Tradução do Elo para português brasileiro
         const traducoes = {
             'Iron': 'Ferro', 'Bronze': 'Bronze', 'Silver': 'Prata', 'Gold': 'Ouro',
             'Platinum': 'Platina', 'Diamond': 'Diamante', 'Ascendant': 'Ascendente',
@@ -107,11 +104,10 @@ router.get('/valorant', async (req, res) => {
             }
         });
 
-        // Retorna a string limpa idêntica ao formato esperado pelo Nightbot
         return res.send(`[VALORANT] ${rankData.name}#${rankData.tag} | Rank: ${currentRank} (${rankData.rr} RR) | Histórico de Hoje: ${rankData.vitorias}V / ${rankData.derrotas}D`);
 
     } catch (error) {
-        console.log("Erro na execução geral:", error.message);
+        console.log("Erro geral:", error.message);
         res.send(`[VALORANT] ${cleanName}#${cleanTag} | Erro ao carregar elo. Verifique se o Nick/Tag estão corretos.`);
     }
 });
