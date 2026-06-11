@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const HenrikDevValorantAPI = require('unofficial-valorant-api');
-const axios = require('axios'); // 🔥 Essencial para bater na rota de carreira
+const axios = require('axios'); 
 
 const vapi = new HenrikDevValorantAPI(process.env.HENRIK_ADVANCE_KEY);
 const cache = {};
@@ -24,7 +24,7 @@ router.get('/valorant', async (req, res) => {
         if (cached && Date.now() - cached.timestamp < 60000) {
             rankData = cached.data;
         } else {
-            // 1. Busca o Elo (Mantemos o SDK aqui porque funciona perfeito)
+            // 1. Busca o Elo (SDK)
             const mmr_data = await vapi.getMMR({ 
                 version: 'v2', 
                 region: 'br', 
@@ -36,13 +36,13 @@ router.get('/valorant', async (req, res) => {
                 throw new Error("Perfil sem dados competitivos recentes.");
             }
 
-            // 2. Busca o histórico quebrando o limite de 10 partidas
+            // 2. Busca o histórico de Carreira via Axios para quebrar o limite de 10 partidas
             let vitorias = 0;
             let derrotas = 0;
             
             try {
-                // 🔥 ROTA LIFETIME: Permite buscar até 100 partidas sem a trava de 10 jogos da rota padrão
-                const urlLifetime = `https://api.henrikdev.com/valorant/v1/lifetime/matches/br/${encodeURIComponent(cleanName)}/${encodeURIComponent(cleanTag)}?mode=competitive&size=25`;
+                // 🔥 CORREÇÃO MÁXIMA: Domínio .xyz !
+                const urlLifetime = `https://api.henrikdev.xyz/valorant/v1/lifetime/matches/br/${encodeURIComponent(cleanName)}/${encodeURIComponent(cleanTag)}?mode=competitive&size=25`;
                 
                 const response = await axios.get(urlLifetime, {
                     headers: { 'Authorization': process.env.HENRIK_ADVANCE_KEY }
@@ -54,19 +54,16 @@ router.get('/valorant', async (req, res) => {
                     const hojeBrasil = new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 
                     matchesList.forEach(match => {
-                        // Na rota Lifetime, a data vem bonitinha no formato ISO
                         const dataPartidaBrasil = new Date(match.meta.started_at).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 
                         if (dataPartidaBrasil === hojeBrasil) {
-                            // Descobre de qual lado o streamer jogou (red ou blue)
+                            // Verifica o time do jogador e a pontuação
                             const myTeam = match.stats.team.toLowerCase(); 
                             const myScore = match.teams[myTeam];
                             
-                            // Descobre a pontuação do time inimigo
                             const enemyTeam = myTeam === 'red' ? 'blue' : 'red';
                             const enemyScore = match.teams[enemyTeam];
                             
-                            // Compara os placares
                             if (myScore > enemyScore) {
                                 vitorias++;
                             } else if (enemyScore > myScore) {
