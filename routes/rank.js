@@ -20,7 +20,7 @@ router.get('/valorant', async (req, res) => {
         let rankData;
         const cached = cache[cacheKey];
 
-        // Cache de 1 minuto para atualização rápida
+        // Cache local de 1 minuto para não estourar a cota da chave
         if (cached && Date.now() - cached.timestamp < 60000) {
             rankData = cached.data;
         } else {
@@ -46,7 +46,11 @@ router.get('/valorant', async (req, res) => {
                     name: cleanName,
                     tag: cleanTag,
                     filter: 'competitive',
-                    size: 25 // Garante um histórico longo
+                    size: 25,
+                    // 🔥 FORÇA O HENRIKDEV A IGNORAR O CACHE DELES E BUSCAR DADOS NOVOS NA RIOT
+                    options: {
+                        uncached: true
+                    }
                 });
 
                 if (matches.data && Array.isArray(matches.data)) {
@@ -54,14 +58,11 @@ router.get('/valorant', async (req, res) => {
                     const hojeBrasil = new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 
                     matches.data.forEach(match => {
-                        // Converte o timestamp do início da partida para a data no fuso de Brasília
                         const dataPartidaBrasil = new Date(match.metadata.game_start * 1000).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
                         
-                        // Verifica se é o modo competitivo oficial
                         const modoJogo = match.metadata.mode;
                         const ehCompetitivo = modoJogo && modoJogo.toLowerCase() === 'competitive';
 
-                        // Comparação direta de data: se foi hoje e é competitivo, computa!
                         if ((dataPartidaBrasil === hojeBrasil) && ehCompetitivo) {
                             const player = match.players.all_players.find(
                                 p => p.name.toLowerCase() === cleanName.toLowerCase()
