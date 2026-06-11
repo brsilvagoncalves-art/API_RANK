@@ -13,37 +13,56 @@ router.get('/valorant', async (req, res) => {
     const cleanTag = tag.trim();
 
     try {
-        // TENTATIVA 1: Endpoint de contingência em formato de texto (ignora bloqueios normais de cabeçalho)
-        const url = `https://api.henrikdev.xyz/valorant/v1/mmr/br/${encodeURIComponent(cleanName)}/${encodeURIComponent(cleanTag)}`;
-        const response = await axios.get(url, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
-            timeout: 4000
-        });
+        // TENTATIVA 1: VLR cache rápido
+        const url = `https://api.vlr.gg/v1/players/${encodeURIComponent(cleanName.toLowerCase())}-${cleanTag.toLowerCase()}`;
+        const response = await axios.get(url, { timeout: 4000 });
 
-        if (response.data && response.data.data) {
-            const elo = response.data.data.currenttierpatched || 'Sem Rank';
-            const rr = response.data.data.ranking_in_tier || 0;
-            return res.send(`[VALORANT] ${cleanName}#${cleanTag} | Rank: ${elo} (${rr} RR)`);
+        if (response.data && response.data.rank) {
+            return res.send(`[VALORANT] ${cleanName}#${cleanTag} | Rank: ${response.data.rank}`);
         }
-        
         throw new Error();
-
-    } catch (error) {
-        // TENTATIVA 2 (BLINDADA): Usando o espelho público direto de comandos para chatbots do Caldas reconstruído
-        // Esse link é hospedado em uma CDN que aceita requisições vindas de redes residenciais locais (localhost)
+    } catch (e) {
         try {
-            const fallbackUrl = `https://c4ldas.com.br/api/valorant/rank?region=br&player=${encodeURIComponent(cleanName)}&tag=${encodeURIComponent(cleanTag)}`;
-            const fallbackRes = await axios.get(fallbackUrl, { timeout: 4000 });
-            
-            if (fallbackRes.data && !fallbackRes.data.includes('Erro') && !fallbackRes.data.includes('not found')) {
-                const cleanResponse = fallbackRes.data.replace(/\s+/g, ' ').trim();
-                return res.send(`[VALORANT] ${cleanName}#${cleanTag} | Rank: ${cleanResponse}`);
-            }
-        } catch (e) {}
+            // TENTATIVA 2: HenrikDev MMR estruturado
+            const fallbackUrl = `https://api.henrikdev.xyz/valorant/v1/mmr/br/${encodeURIComponent(cleanName)}/${encodeURIComponent(cleanTag)}`;
+            const fallbackRes = await axios.get(fallbackUrl, {
+                headers: { 'User-Agent': 'Mozilla/5.0' },
+                timeout: 4000
+            });
 
-        // SE TUDO NO LOCALHOST FALHAR (Devido ao bloqueio temporário do seu IP de rede)
-        // Devolvemos uma mensagem limpa com o link direto para o chat poder clicar
-        res.send(`[VALORANT] ${cleanName}#${cleanTag} | Perfil privado ou instabilidade temporária na consulta local. Veja o elo diretamente em: tracker.gg/valorant/profile/riot/${encodeURIComponent(cleanName)}%23${cleanTag}`);
+            if (fallbackRes.data && fallbackRes.data.data) {
+                const eloIngles = fallbackRes.data.data.currenttierpatched || 'Sem Rank';
+                const rr = fallbackRes.data.data.ranking_in_tier || 0;
+
+                const traducoes = {
+                    'Iron': 'Ferro', 'Bronze': 'Bronze', 'Silver': 'Prata', 'Gold': 'Ouro',
+                    'Platinum': 'Platina', 'Diamond': 'Diamante', 'Ascendant': 'Ascendente',
+                    'Immortal': 'Imortal', 'Radiant': 'Radiante'
+                };
+
+                let currentRank = eloIngles;
+                Object.keys(traducoes).forEach(key => {
+                    if (currentRank.includes(key)) currentRank = currentRank.replace(key, traducoes[key]);
+                });
+
+                return res.send(`[VALORANT] ${cleanName}#${cleanTag} | Rank: ${currentRank} (${rr} RR)`);
+            }
+            throw new Error();
+        } catch (err) {
+            try {
+                // TENTATIVA 3 (O pulo do gato para o Render): Endpoint público alternativo de texto
+                // Como o Render usa IP americano/europeu, ele acessa essa rota sem problemas de travamento local
+                const txtUrl = `https://api.kyros.tv/valorant/v1/profile/${encodeURIComponent(cleanName)}/${encodeURIComponent(cleanTag)}`;
+                const txtRes = await axios.get(txtUrl, { timeout: 4000 });
+                
+                if (txtRes.data && txtRes.data.rank) {
+                    return res.send(`[VALORANT] ${cleanName}#${cleanTag} | Rank: ${txtRes.data.rank}`);
+                }
+            } catch (txtErr) {}
+
+            // Resposta caso o jogador realmente não exista ou a tag esteja errada
+            res.send(`[VALORANT] ${cleanName}#${cleanTag} | Perfil privado ou não encontrado. Verifique se digitou o Nick e a Tag exatamente como aparecem no jogo.`);
+        }
     }
 });
 
