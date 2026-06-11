@@ -20,11 +20,11 @@ router.get('/valorant', async (req, res) => {
         let rankData;
         const cached = cache[cacheKey];
 
-        // Mantemos o cache de 5 minutos para proteger sua cota de requisições
+        // Cache de 1 minuto para atualizar mais rápido conforme conversamos antes
         if (cached && Date.now() - cached.timestamp < 60000) {
             rankData = cached.data;
         } else {
-            // 1. Busca os dados de Elo atuais (V2)
+            // 1. Busca os dados de Elo atuais
             const mmr_data = await vapi.getMMR({ 
                 version: 'v2', 
                 region: 'br', 
@@ -36,7 +36,7 @@ router.get('/valorant', async (req, res) => {
                 throw new Error("Perfil sem dados competitivos recentes.");
             }
 
-            // 2. Busca o histórico das últimas 5 partidas para calcular o W/L do dia
+            // 2. Busca o histórico das últimas partidas para calcular o W/L do dia
             let vitorias = 0;
             let derrotas = 0;
             
@@ -45,24 +45,30 @@ router.get('/valorant', async (req, res) => {
                     region: 'br',
                     name: cleanName,
                     tag: cleanTag,
-                    filter: 'competitive' // Filtra apenas para jogos competitivos
+                    filter: 'competitive'
                 });
 
                 if (matches.data && Array.isArray(matches.data)) {
-                    const hoje = new Date().toISOString().split('T')[0]; // Pega a data atual (AAAA-MM-DD)
+                    // CORREÇÃO DE FUSO HORÁRIO: Pega a data de hoje no fuso correto do Brasil (AAAA-MM-DD)
+                    const hojeBrasil = new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+                    // Converte de DD/MM/AAAA para o padrão internacional AAAA-MM-DD para comparar
+                    const [dia, mes, ano] = hojeBrasil.split('/');
+                    const dataHojeFormatada = `${ano}-${mes}-${dia}`;
 
                     matches.data.forEach(match => {
-                        // Verifica se a partida foi jogada no dia de hoje
-                        const matchDate = new Date(match.metadata.game_start * 1000).toISOString().split('T')[0];
+                        //CORREÇÃO DE FUSO HORÁRIO: Converte o horário do jogo para a data do Brasil
+                        const matchDateBrasil = new Date(match.metadata.game_start * 1000).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+                        const [mDia, mMes, mAno] = matchDateBrasil.split('/');
+                        const dataMatchFormatada = `${mAno}-${mMes}-${mDia}`;
                         
-                        if (matchDate === hoje) {
-                            // Encontra o time em que o streamer jogou
+                        // Agora a comparação é 100% precisa com o horário de Brasília
+                        if (dataMatchFormatada === dataHojeFormatada) {
                             const player = match.players.all_players.find(
                                 p => p.name.toLowerCase() === cleanName.toLowerCase()
                             );
                             
                             if (player) {
-                                const playerTeam = player.team.toLowerCase(); // 'red' ou 'blue'
+                                const playerTeam = player.team.toLowerCase();
                                 const teamStats = match.teams[playerTeam];
                                 
                                 if (teamStats) {
@@ -78,7 +84,6 @@ router.get('/valorant', async (req, res) => {
                 }
             } catch (matchError) {
                 console.log("Erro ao computar histórico de partidas:", matchError.message);
-                // Se o histórico falhar, o código continua e exibe o rank mesmo sem o W/L
             }
 
             rankData = {
@@ -107,7 +112,6 @@ router.get('/valorant', async (req, res) => {
             }
         });
 
-        // Formato de resposta completo ideal para o chat da Twitch
         return res.send(`[VALORANT] ${rankData.name}#${rankData.tag} | Rank: ${currentRank} (${rankData.rr} RR) | Histórico de Hoje: ${rankData.vitorias}V / ${rankData.derrotas}D`);
 
     } catch (error) {
