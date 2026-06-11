@@ -1,10 +1,10 @@
 const express = require('express');
 const app = express();
-const cors = require('cors'); // Caso use CORS
+//const cors = require('cors');
 const rankRoute = require('./routes/rank'); // Ajuste o caminho se seu arquivo for rank.js
 
 app.use(express.json());
-app.use(cors());
+//app.use(cors());
 
 // VINCULAÇÃO CORRETA: Deixa a sub-rota cuidar do mapeamento do '/valorant'
 app.use('/api', rankRoute);
