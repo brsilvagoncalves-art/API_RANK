@@ -1,20 +1,20 @@
 const express = require('express');
 const app = express();
-const rankRoute = require('./routes/rank');
+const cors = require('cors'); // Caso use CORS
+const rankRoute = require('./routes/rank'); // Ajuste o caminho se seu arquivo for rank.js
 
-const PORT = process.env.PORT || 3000;
-
-// Middlawere para permitir que o JSON seja lido
 app.use(express.json());
+app.use(cors());
 
-// Rota principal para o comando de rank
+// VINCULAÇÃO CORRETA: Deixa a sub-rota cuidar do mapeamento do '/valorant'
 app.use('/api', rankRoute);
 
-// Rota para teste
-app.get('/', (req, res) => {
-    res.send('API de Rank para Nightbot está funcionando!');
+// Rota padrão para caso digitem algo completamente errado na raiz
+app.use((req, res) => {
+    res.status(404).send('[VALORANT] Rota inválida. Use /api/valorant?name=NOME&tag=TAG');
 });
 
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`Servidor rodando na porta ${PORT}`);
 });
