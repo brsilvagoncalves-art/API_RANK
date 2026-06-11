@@ -20,7 +20,7 @@ router.get('/valorant', async (req, res) => {
         let rankData;
         const cached = cache[cacheKey];
 
-        // Cache de 1 minuto para atualização ágil
+        // Cache de 1 minuto para atualização rápida
         if (cached && Date.now() - cached.timestamp < 60000) {
             rankData = cached.data;
         } else {
@@ -46,22 +46,23 @@ router.get('/valorant', async (req, res) => {
                     name: cleanName,
                     tag: cleanTag,
                     filter: 'competitive',
-                    size: 25 // Puxa uma lista maior para garantir que cobre o dia de jogos
+                    size: 25 // Garante um histórico longo
                 });
 
                 if (matches.data && Array.isArray(matches.data)) {
-                    const agora = Date.now();
-                    const limiteQuinzeHoras = 15 * 60 * 60 * 1000; // Janela de tempo de uma stream de hoje
+                    // Obtém a data de HOJE no fuso horário de Brasília (Formato: DD/MM/AAAA)
+                    const hojeBrasil = new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 
                     matches.data.forEach(match => {
-                        const matchTimestamp = match.metadata.game_start * 1000;
+                        // Converte o timestamp do início da partida para a data no fuso de Brasília
+                        const dataPartidaBrasil = new Date(match.metadata.game_start * 1000).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
                         
-                        // 🔥 TRAVA DE SEGURANÇA: Só conta se for estritamente o modo Competitivo oficial da Riot
+                        // Verifica se é o modo competitivo oficial
                         const modoJogo = match.metadata.mode;
                         const ehCompetitivo = modoJogo && modoJogo.toLowerCase() === 'competitive';
 
-                        // Só processa se estiver na janela de tempo E for modo competitivo de verdade
-                        if ((agora - matchTimestamp < limiteQuinzeHoras) && ehCompetitivo) {
+                        // Comparação direta de data: se foi hoje e é competitivo, computa!
+                        if ((dataPartidaBrasil === hojeBrasil) && ehCompetitivo) {
                             const player = match.players.all_players.find(
                                 p => p.name.toLowerCase() === cleanName.toLowerCase()
                             );
