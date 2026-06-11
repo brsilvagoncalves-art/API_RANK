@@ -2,10 +2,7 @@ const express = require('express');
 const router = express.Router();
 const HenrikDevValorantAPI = require('unofficial-valorant-api');
 
-// Inicializa a API utilizando a chave de ambiente que você vai colocar no Render
 const vapi = new HenrikDevValorantAPI(process.env.HENRIK_ADVANCE_KEY);
-
-// Objeto de cache local na memória do servidor para evitar Rate Limits
 const cache = {};
 
 router.get('/valorant', async (req, res) => {
@@ -17,19 +14,17 @@ router.get('/valorant', async (req, res) => {
 
     const cleanName = name.trim();
     const cleanTag = tag.trim();
-
-    // Chave única de cache baseada no jogador
     const cacheKey = `br-${cleanName.toLowerCase()}-${cleanTag.toLowerCase()}`;
 
     try {
         let rankData;
-
-        // VERIFICAÇÃO DE CACHE: Se os dados existirem e tiverem menos de 5 minutos (300.000 ms), usa o cache
         const cached = cache[cacheKey];
+
+        // Mantemos o cache de 5 minutos para proteger sua cota de requisições
         if (cached && Date.now() - cached.timestamp < 300000) {
             rankData = cached.data;
         } else {
-            // Se não estiver no cache ou expirou, faz a chamada oficial usando o pacote
+            // 1. Busca os dados de Elo atuais (V2)
             const mmr_data = await vapi.getMMR({ 
                 version: 'v2', 
                 region: 'br', 
@@ -37,24 +32,68 @@ router.get('/valorant', async (req, res) => {
                 tag: cleanTag 
             });
 
-            // Validação estrita exatamente igual ao exemplo funcional
             if (mmr_data.error || !mmr_data.data?.current_data?.currenttierpatched) {
-                throw new Error("Perfil sem dados competitivos recentes ou Riot ID incorreto.");
+                throw new Error("Perfil sem dados competitivos recentes.");
             }
 
-            // Estrutura os dados limpos
+            // 2. Busca o histórico das últimas 5 partidas para calcular o W/L do dia
+            let vitorias = 0;
+            let derrotas = 0;
+            
+            try {
+                const matches = await vapi.getMatches({
+                    region: 'br',
+                    name: cleanName,
+                    tag: cleanTag,
+                    filter: 'competitive' // Filtra apenas para jogos competitivos
+                });
+
+                if (matches.data && Array.isArray(matches.data)) {
+                    const hoje = new Date().toISOString().split('T')[0]; // Pega a data atual (AAAA-MM-DD)
+
+                    matches.data.forEach(match => {
+                        // Verifica se a partida foi jogada no dia de hoje
+                        const matchDate = new Date(match.metadata.game_start * 1000).toISOString().split('T')[0];
+                        
+                        if (matchDate === hoje) {
+                            // Encontra o time em que o streamer jogou
+                            const player = match.players.all_players.find(
+                                p => p.name.toLowerCase() === cleanName.toLowerCase()
+                            );
+                            
+                            if (player) {
+                                const playerTeam = player.team.toLowerCase(); // 'red' ou 'blue'
+                                const teamStats = match.teams[playerTeam];
+                                
+                                if (teamStats) {
+                                    if (teamStats.has_won) {
+                                        vitorias++;
+                                    } else {
+                                        derrotas++;
+                                    }
+                                }
+                            }
+                        }
+                    });
+                }
+            } catch (matchError) {
+                console.log("Erro ao computar histórico de partidas:", matchError.message);
+                // Se o histórico falhar, o código continua e exibe o rank mesmo sem o W/L
+            }
+
             rankData = {
                 rank: mmr_data.data.current_data.currenttierpatched,
                 rr: mmr_data.data.current_data.ranking_in_tier,
                 name: mmr_data.data.name,
-                tag: mmr_data.data.tag
+                tag: mmr_data.data.tag,
+                vitorias,
+                derrotas
             };
 
-            // Salva no cache com o timestamp atual
             cache[cacheKey] = { data: rankData, timestamp: Date.now() };
         }
 
-        // Dicionário profissional de tradução para manter em português no chat do streamer
+        // Tradução do Elo para português
         const traducoes = {
             'Iron': 'Ferro', 'Bronze': 'Bronze', 'Silver': 'Prata', 'Gold': 'Ouro',
             'Platinum': 'Platina', 'Diamond': 'Diamante', 'Ascendant': 'Ascendente',
@@ -68,12 +107,12 @@ router.get('/valorant', async (req, res) => {
             }
         });
 
-        // Formato de resposta limpo e direto padrão para o Nightbot
-        return res.send(`[VALORANT] ${rankData.name}#${rankData.tag} | Rank: ${currentRank} (${rankData.rr} RR)`);
+        // Formato de resposta completo ideal para o chat da Twitch
+        return res.send(`[VALORANT] ${rankData.name}#${rankData.tag} | Rank: ${currentRank} (${rankData.rr} RR) | Histórico de Hoje: ${rankData.vitorias}V / ${rankData.derrotas}D`);
 
     } catch (error) {
-        console.log("Erro tratado na API profissional:", error.message);
-        res.send(`[VALORANT] ${cleanName}#${cleanTag} | Não foi possível carregar o elo. Certifique-se de que o perfil está PÚBLICO no tracker.gg e que o Nick/Tag estão corretos.`);
+        console.log("Erro na execução geral:", error.message);
+        res.send(`[VALORANT] ${cleanName}#${cleanTag} | Erro ao carregar elo. Verifique se o Nick/Tag estão corretos.`);
     }
 });
 
