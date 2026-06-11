@@ -46,7 +46,7 @@ router.get('/valorant', async (req, res) => {
                     name: cleanName,
                     tag: cleanTag,
                     filter: 'competitive',
-                    size: 15 // Puxa uma lista maior para garantir que cobre o dia de jogos
+                    limit: 25 // Puxa uma lista maior para garantir que cobre o dia de jogos
                 });
 
                 if (matches.data && Array.isArray(matches.data)) {
