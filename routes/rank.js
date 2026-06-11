@@ -21,7 +21,7 @@ router.get('/valorant', async (req, res) => {
         const cached = cache[cacheKey];
 
         // Mantemos o cache de 5 minutos para proteger sua cota de requisições
-        if (cached && Date.now() - cached.timestamp < 300000) {
+        if (cached && Date.now() - cached.timestamp < 600000) {
             rankData = cached.data;
         } else {
             // 1. Busca os dados de Elo atuais (V2)
