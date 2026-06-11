@@ -20,7 +20,7 @@ router.get('/valorant', async (req, res) => {
         let rankData;
         const cached = cache[cacheKey];
 
-        // Cache local de 1 minuto para proteção de taxa da API
+        // Cache local de 1 minuto
         if (cached && Date.now() - cached.timestamp < 60000) {
             rankData = cached.data;
         } else {
@@ -36,7 +36,7 @@ router.get('/valorant', async (req, res) => {
                 throw new Error("Perfil sem dados competitivos recentes.");
             }
 
-            // 2. Busca o histórico estendido de partidas
+            // 2. Busca o histórico de partidas com os novos padrões da API
             let vitorias = 0;
             let derrotas = 0;
             
@@ -45,7 +45,11 @@ router.get('/valorant', async (req, res) => {
                     region: 'br',
                     name: cleanName,
                     tag: cleanTag,
-                    size: 25 // Limite alto para garantir que lê todas as partidas do dia
+                    mode: 'competitive', // 🔥 ATUALIZADO: Mudou de 'filter' para 'mode' nas novas versões!
+                    size: 25,
+                    options: {
+                        uncached: true // 🔥 Força o HenrikDev a buscar dados limpos na Riot
+                    }
                 });
 
                 if (matches.data && Array.isArray(matches.data)) {
@@ -53,11 +57,13 @@ router.get('/valorant', async (req, res) => {
                     const hojeBrasil = new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 
                     matches.data.forEach(match => {
-                        // Converte o timestamp do início da partida para a data no fuso de Brasília
                         const dataPartidaBrasil = new Date(match.metadata.game_start * 1000).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+                        
+                        // Garante dupla validação de modo competitivo por string bruta caso o parâmetro falhe
+                        const modoJogo = match.metadata.mode;
+                        const ehCompetitivo = modoJogo && modoJogo.toLowerCase() === 'competitive';
 
-                        // Se a partida aconteceu na data de hoje no Brasil, ela entra na soma
-                        if (dataPartidaBrasil === hojeBrasil) {
+                        if ((dataPartidaBrasil === hojeBrasil) && ehCompetitivo) {
                             const player = match.players.all_players.find(
                                 p => p.name.toLowerCase() === cleanName.toLowerCase()
                             );
@@ -93,7 +99,7 @@ router.get('/valorant', async (req, res) => {
             cache[cacheKey] = { data: rankData, timestamp: Date.now() };
         }
 
-        // Tradução do Elo para português brasileiro
+        // Tradução do Elo para português
         const traducoes = {
             'Iron': 'Ferro', 'Bronze': 'Bronze', 'Silver': 'Prata', 'Gold': 'Ouro',
             'Platinum': 'Platina', 'Diamond': 'Diamante', 'Ascendant': 'Ascendente',
@@ -107,7 +113,6 @@ router.get('/valorant', async (req, res) => {
             }
         });
 
-        // Retorna a string limpa idêntica ao formato esperado pelo Nightbot
         return res.send(`[VALORANT] ${rankData.name}#${rankData.tag} | Rank: ${currentRank} (${rankData.rr} RR) | Histórico de Hoje: ${rankData.vitorias}V / ${rankData.derrotas}D`);
 
     } catch (error) {
